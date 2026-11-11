@@ -1,12 +1,17 @@
 (() => {
   'use strict';
   // ---------- 配置 ----------
-  // 素材：神凰一镜到底视频（1280×720，24fps，14.875 秒），拆成序列帧 frames/0000–0357.jpg。
+  // 素材：神凰一镜到底视频（1920×1080，24fps，14.875 秒），调色 + 自适应锐化后拆成 WebP 序列帧 frames/{hd,sd}/0000–0357.webp。
   // 0–7.4 秒展翅滑翔落地并走向镜头，7.4–10.2 秒近景威严凝视镜头，10.3–11.9 秒向左侧首转身，11.9–14.875 秒走出左画框，留下修长凤尾与流光星尘。
   const FPS = 24, LAST_FRAME = 357, DURATION = LAST_FRAME / FPS;
-  const SRC_W = 1280, SRC_H = 720;
-  // 神凰前景抠像只做标题可见的前段：masks/NNN.png 上下两格依次是第 2N、2N+1 帧，透明度即前景神凰与鎏金绶带。
-  const MASK_LAST = 240, MASK_W = 640, MASK_H = 360;
+  // 画质分档：默认 1080p 超清（hd）。开了省流模式、2G 网络、内存 ≤ 2GB 的设备直接用 720p（sd）；
+  // 其余情况先拉前 12 帧实测网速，补齐开场帧预计要超过 9 秒才自动降到 720p（浏览器自报的网速常常不准，所以以实测为准）
+  const conn = navigator.connection || {};
+  let tier = conn.saveData || /2g$/.test(conn.effectiveType || '') || (navigator.deviceMemory && navigator.deviceMemory <= 2) ? 'sd' : 'hd';
+  const TIER_PROBE = 12, TIER_BUDGET = 9;
+  const SRC_W = 1920, SRC_H = 1080;        // 画面的逻辑尺寸（16:9），两档素材都按它铺满；绘制时用图片自身像素尺寸
+  // 神凰前景抠像只做标题可见的前段：masks/NNN.webp 上下两格依次是第 2N、2N+1 帧（960×540，按 1080p 原帧引导滤波精修边缘），透明度即前景神凰与鎏金绶带。
+  const MASK_LAST = 241, MASK_W = 960, MASK_H = 540;
   // 开场：页面打开后，神凰从远空云雾滑翔落地走到近景（0 → INTRO_T 秒），近景就是首页的默认位置
   const INTRO_T = 7.4, INTRO_DELAY = 400;
   // 吸附点（视频秒数）。hold：停在这里时定格，镜头极慢地推向神凰双眸之间（比例坐标），zoom 为推近幅度
@@ -18,7 +23,7 @@
   const CONTENTS_STAGE = 1, END_STAGE = 2;
   const END_W = 0.9;                       // 目录到结尾的切换时长（秒），这段画面不动，只换文字
   // 姓名和联系方式：填上就会显示在结尾页，点击可复制；留空则不显示
-  const CONTACT = { name: '', email: '', wechat: '' };
+  const CONTACT = { name: '郭凯华', email: '', wechat: '' };
   // 播放速度（相对原速）。点击后为了让目录早点出来：凝视段 2 倍速带过；转身段 1.35 倍；走出画面段 0.95 倍
   const rate = t => lerp(1.15, 0.92, smoothstep(10.8, 12.0, t)) * (1 + smoothstep(7.4, 7.7, t) * lerp(1, 0.38, smoothstep(9.0, 9.8, t)) * (1 - smoothstep(10.4, 11.4, t)));
   const LAST_SLOT = LAST_FRAME * 2;
@@ -28,7 +33,8 @@
   // 四张卡片随神凰转身走出画面依次升起
   const CARD_T = [12.35, 12.7, 13.05, 13.4];
   const CARD_GAP = 130;                    // 快进或从结尾页回来时几张会同时到点：按这个间隔（毫秒）排队
-  const READY_FRAME = 178;                 // 走近到凝视的帧加载完就进入页面，其余在后台继续
+  const READY_FRAME = 178;                 // 开场（远空 → 近景凝视）用到的最后一帧
+  const READY_STRIDE = 4;                  // 快速起播：先隔 4 帧拉一遍开场骨架帧，再回头补齐中间帧
 
   const film = document.getElementById('film'), fctx = film.getContext('2d');
   const front = document.getElementById('front'), tctx = front.getContext('2d');
@@ -78,14 +84,14 @@
 
   // ---------- 序列帧与抠像加载：按时间顺序，前段优先（完美兼容 file:// 双击直开与 http:// 服务器） ----------
   const frames = [], masks = [];
-  let loadedFrames = 0, started = false;
+  let loadedFrames = 0, loadedBytes = 0, started = false;
   const pad = (n, w) => String(n).padStart(w, '0');
   let useImg = location.protocol === 'file:', blobOk = false;
   const loadImage = (src, into, i, tries = 3) => new Promise(done => {
     const retry = () => tries > 1 ? setTimeout(() => loadImage(src, into, i, tries - 1).then(done), 400) : done();
     if (!useImg) {
       fetch(src).then(r => r.ok ? r.blob() : Promise.reject(r.status))
-        .then(b => { into[i] = b; blobOk = true; done(); })
+        .then(b => { into[i] = b; blobOk = true; if (into === frames) loadedBytes += b.size; done(); })
         .catch(() => {
           if (!blobOk) { useImg = true; loadImage(src, into, i, 1).then(done); } else retry();
         });
@@ -98,24 +104,60 @@
     img.src = src;
   });
 
+  // 加载顺序：首帧 → 开场骨架帧（每 4 帧一张）→ 按时间补齐其余帧。抠像图跟着它的第一帧一起排队。
+  // 从作品链接直接打开时反过来：先加载目录那一帧。
+  let loadT0 = 0;
   async function loadAll() {
-    const jobs = [];
-    for (let i = 0; i <= LAST_FRAME; i++) {
-      jobs.push(() => loadImage(`frames/${pad(i, 4)}.jpg`, frames, i * 2).then(() => { loadedFrames++; progressLoad(); }));
-      if (i % 2 === 0 && i <= MASK_LAST) jobs.push(() => loadImage(`masks/${pad(i / 2, 3)}.png`, masks, i / 2));
+    const order = [], seen = new Set();
+    const add = i => { if (i >= 0 && i <= LAST_FRAME && !seen.has(i)) { seen.add(i); order.push(i); } };
+    if (deepWork >= 0) for (let i = LAST_FRAME; i >= 0; i--) add(i);
+    else {
+      add(0);
+      for (let i = 0; i <= READY_FRAME; i += READY_STRIDE) add(i);
+      add(READY_FRAME);
+      for (let i = 0; i <= LAST_FRAME; i++) add(i);
     }
+    const jobs = [];
+    for (const i of order) {
+      jobs.push(() => loadImage(`frames/${tier}/${pad(i, 4)}.webp`, frames, i * 2).then(() => { loadedFrames++; probeTier(); progressLoad(); }));
+      if (i % 2 === 0 && i <= MASK_LAST && !(deepWork >= 0)) jobs.push(() => loadImage(`masks/${pad(i / 2, 3)}.webp`, masks, i / 2));
+    }
+    if (deepWork >= 0) for (let k = 0; k <= MASK_LAST >> 1; k++) jobs.push(() => loadImage(`masks/${pad(k, 3)}.webp`, masks, k));
     let next = 0;
     const worker = async () => { while (next < jobs.length) await jobs[next++](); };
-    if (deepWork >= 0) jobs.reverse();
-    await Promise.all(Array.from({ length: 6 }, worker));
+    loadT0 = performance.now();
+    await Promise.all(Array.from({ length: 8 }, worker));
     progressLoad(true);
   }
 
+  function probeTier() {
+    if (tier !== 'hd' || loadedFrames !== TIER_PROBE || !loadedBytes) return;
+    const secs = (performance.now() - loadT0) / 1000, bps = loadedBytes / Math.max(.05, secs);
+    const need = (READY_FRAME + 1 - TIER_PROBE) * (loadedBytes / TIER_PROBE);
+    if (need / bps > TIER_BUDGET) tier = 'sd';
+  }
+
+  // 何时进入页面：开场骨架帧齐了，并且按当前网速估算，剩下的开场帧能在开场动画播到之前补齐（或者已经全部到位）
+  function introReady() {
+    let skel = 0, skelN = 0, got = 0;
+    for (let i = 0; i <= READY_FRAME; i++) {
+      const has = !!frames[i * 2];
+      if (has) got++;
+      if (i % READY_STRIDE === 0) { skelN++; if (has) skel++; }
+    }
+    const total = READY_FRAME + 1;
+    const ratio = (skel / skelN) * .5 + (got / total) * .5;
+    if (skel < skelN || !frames[READY_FRAME * 2]) return [false, ratio];
+    if (got >= total) return [true, 1];
+    const spent = (performance.now() - loadT0) / 1000, perFrame = spent / Math.max(1, loadedFrames);
+    const left = (total - got) * perFrame;   // 估算补齐剩余开场帧还要多少秒
+    return [left < W0 * .7, ratio];
+  }
+
   function progressLoad(all) {
-    let ahead = 0;
-    for (let i = 0; i <= READY_FRAME; i++) if (frames[i * 2]) ahead++;
-    document.getElementById('loaderBar').style.width = `${Math.round(ahead / (READY_FRAME + 1) * 100)}%`;
-    if (!started && (all || ahead > READY_FRAME || (deepWork >= 0 && frames[LAST_SLOT]))) {
+    const [introOk, ratio] = deepWork >= 0 ? [false, loadedFrames / (LAST_FRAME + 1)] : introReady();
+    document.getElementById('loaderBar').style.width = `${Math.round(Math.min(1, ratio) * 100)}%`;
+    if (!started && (all || introOk || (deepWork >= 0 && frames[LAST_SLOT]))) {
       started = true; document.body.classList.add('ready'); dirty = true;
       keepDecoded(deepWork >= 0 ? LAST_SLOT : Math.max(0, lastFrame), dir);
       if (deepWork < 0) {
@@ -135,7 +177,9 @@
 
   function keepDecoded(center, dir) {
     if (useImg) return; // file:// 模式下直接使用已解码的 HTMLImageElement，零开销
-    const ahead = innerWidth < 800 ? 48 : 80, behind = 16;
+    // 预解码窗口（槽位，2 槽 = 1 帧）：1080p 位图每张约 8MB，手机上收窄窗口控制内存
+    const small = innerWidth < 800;
+    const ahead = tier === 'hd' ? (small ? 36 : 60) : (small ? 48 : 80), behind = small ? 12 : 16;
     const lo = center - (dir < 0 ? ahead : behind), hi = center + (dir < 0 ? behind : ahead);
     const want = new Set();
     for (let s = Math.max(0, lo); s <= Math.min(LAST_SLOT, hi); s++) {
@@ -219,7 +263,7 @@
   }
   function drawFilm(i) {
     const src = frameSource(i);
-    if (src) fctx.drawImage(src, 0, 0, SRC_W, SRC_H, ...placement());
+    if (src) fctx.drawImage(src, 0, 0, src.naturalWidth || src.width, src.naturalHeight || src.height, ...placement());
   }
   function drawFront(i, titleVisible) {
     tctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -239,7 +283,14 @@
   }
 
   // 文字跟着镜头：标题在神凰走近时向两边分开、微缩，转身走出时目录从上下浮现
-  let lastScene = '';
+  let lastScene = '', navScene = '0';
+  const aboutBtn = document.querySelector('[data-about]');
+  // 导航高亮：打开个人介绍时亮「关于」，否则跟随当前场景
+  function syncNav() {
+    const about = typeof openIdx !== 'undefined' && openIdx === ABOUT;
+    navButtons.forEach(b => b.setAttribute('aria-current', String(!about && b.dataset.nav === navScene)));
+    if (aboutBtn) aboutBtn.setAttribute('aria-current', String(about));
+  }
   function updateText(t) {
     const css = (k, v) => root.style.setProperty(k, v);
     const u = smoothstep(2.4, 7.0, t);
@@ -287,7 +338,8 @@
       }[scene];
       document.getElementById('sceneNo').textContent = info[0];
       document.getElementById('sceneName').textContent = info[1];
-      navButtons.forEach(b => b.setAttribute('aria-current', String(b.dataset.nav === info[2])));
+      navScene = info[2];
+      syncNav();
       document.getElementById('hint').innerHTML = info[3];
     }
     return titleO > .01;
@@ -460,12 +512,16 @@
   addEventListener('resize', layout);
 
   // ---------- 作品：点目录卡片，卡片飞行放大成全屏阅读页，展示 Figma 终稿每页高清图 ----------
+  // 每页导出 3840×2160（Figma 2 倍图），再出 1280 / 2560 两档；浏览器按屏幕宽度和像素密度自动挑最合适的一档
   const WORKS = [
-    { slug: 'e-service', no: '01', title: 'E服务小程序', focal: '74% 50%', pages: ['人保寿险 E服务 项目封面', '业务目标与体验策略拆解', '竞品分析', '首页体验重构方案', '首页重构', '个人中心重构', '权益中心重构：构建分层认知与服务触达', '设计总览：部分活动长图展示', '界面总览 THE END'] },
-    { slug: 'tai-life', no: '02', title: '泰生活 APP', focal: '76% 50%', pages: ['泰生活项目封面', '老年用户特征', '简化信息内容，减弱信息干扰', '操作层设计', '缺省页设计', '界面总览 THE END'] },
-    { slug: 'cai-ling-tong', no: '03', title: '采灵通', focal: '6% 50%', pages: ['采销数智化 SaaS 平台项目封面', '业务背景', '竞品分析', '制定规范', '高效经营概览与数据决策', '高效检索与批量处理', '结构化表单与准入辅助设计', '可视化搭建与灵活配置', '可视化搭建与桌面端渲染'] },
-    { slug: 'other-works', no: '04', title: '其他作品', focal: '70% 50%', pages: ['AI 赋能运营设计：开学元气补给', 'AI 赋能运营设计：开学焕新计划', 'AI 赋能运营设计：活动主视觉', 'AI 赋能运营设计：大会主视觉', 'AI 赋能运营设计：数据大屏', 'AI 赋能运营设计：数据大屏'] },
+    { slug: 'cai-ling-tong', no: '01', title: '采灵通', focal: '64% 50%', pages: ['采灵通：采销数智化 SaaS 平台项目封面', '业务背景与痛点分析', '竞品分析', '制定规范', '高效经营概览与数据决策', '高效检索与批量处理', '结构化表单与准入辅助设计', '可视化搭建与灵活配置', '可视化搭建与桌面端渲染', '京东京麦部分页面展示', '其他页面展示（一）', '其他页面展示（二）'] },
+    { slug: 'da-ji-shi', no: '02', title: '大吉市', focal: '70% 50%', pages: ['大吉市：生鲜购物体验项目介绍', 'UI 视觉规范', '首页展示', '购物车介绍', '我的页面：围绕账户查看、订单处理与日常服务', '早餐好搭档', '会员中心', '当季鲜品', '页面总览'] },
+    { slug: 'ru-yi', no: '03', title: '如意医疗', focal: '60% 50%', pages: ['如意：AI 健康服务项目介绍', '首页展示：让健康疑问有清楚的表达起点', '健康页面：让信息记录带着当时的情况呈现', '就医页面：让就医选择有据可循', '报告解读：先看关注项，再对照数值与原报告', '等待医生接诊：看清进度与已提交内容', '页面总览'] },
+    { slug: 'ai-ops', no: '04', title: '运营设计', focal: '74% 50%', pages: ['AI 赋能运营设计：开学元气补给', 'AI 赋能运营设计：开学焕新计划', 'AI 赋能运营设计：活动主视觉', 'AI 赋能运营设计：新年与夏日双主题', 'AI 赋能运营设计：去野与春日双主题', 'AI 赋能运营设计：数据大屏（一）', 'AI 赋能运营设计：数据大屏（二）'] },
+    { slug: 'about', no: '00', title: '个人介绍', focal: '50% 50%', pages: ['个人介绍：郭凯华，UX / 产品体验设计'] },
   ];
+  const PROJECTS = 4, ABOUT = 4;            // 前 4 个是目录里的作品，第 5 个是个人介绍（顶部导航「关于」打开）
+  const PAGE_W = [1280, 2560, 3840], PAGE_SIZES = '(min-width: 1920px) 1920px, 100vw';
   const MORPH_MS = 620, MORPH_EASE = 'cubic-bezier(.22,1,.36,1)', PAGE_RADIUS = 0;
   const $ = id => document.getElementById(id);
   const reader = $('reader'), rPages = $('rPages'), rEnd = $('rEnd');
@@ -473,8 +529,8 @@
   const cards = [...document.querySelectorAll('[data-work]')];
   const narrow = matchMedia('(max-aspect-ratio:4/5)');
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const sheetOf = (i, p) => `works/wk-${i + 1}-${p >> 1}.webp`;
-  const slotPos = p => (p & 1 ? '0 100%' : '0 0');
+  const pageSrc = (i, p, wd) => `works/${WORKS[i].slug}/${pad(p + 1, 2)}-${wd}.webp`;
+  const srcsetOf = (i, p) => PAGE_W.map(wd => `${pageSrc(i, p, wd)} ${wd}w`).join(', ');
   let afterClose = null, openIdx = -1, busy = false, pushed = false, returnFocus = null;
   const savedTop = {};
 
@@ -487,56 +543,60 @@
   const pushHash = i => { try { history.pushState({ work: i }, '', hashOf(i)); pushed = true; } catch { pushed = false; } };
   const replaceHash = i => { try { history.replaceState(null, '', i < 0 ? location.pathname + location.search : hashOf(i)); } catch {} };
 
-  const COVER_W = 1920, COVER_H = 1080;
-  let coversImg = null;
-  function coverCanvas(i) {
-    const c = document.createElement('canvas');
-    c.width = COVER_W; c.height = COVER_H;
-    c.style.objectPosition = WORKS[i].focal;
-    if (coversImg) c.getContext('2d').drawImage(coversImg, 0, i * COVER_H, COVER_W, COVER_H, 0, 0, COVER_W, COVER_H);
-    return c;
+  // 封面：直接用每个作品第 1 页的 1280 图，卡片、飞行过渡和「下一个作品」缩略图共用同一张（浏览器缓存里只有一份）
+  let coversReady = false;
+  function coverImg(i) {
+    const img = new Image();
+    img.decoding = 'async'; img.alt = '';
+    img.src = pageSrc(i, 0, 1280);
+    img.style.objectPosition = WORKS[i].focal;
+    return img;
   }
   async function loadCovers() {
-    const img = new Image();
-    img.src = 'works/covers.webp';
-    try { await img.decode(); } catch { return; }
-    coversImg = img;
+    const imgs = cards.map((c, i) => coverImg(i));
+    await Promise.all(imgs.map(img => img.decode().catch(() => {})));
     cards.forEach((card, i) => {
       const s = document.createElement('span');
       s.className = 'cover';
-      s.append(coverCanvas(i));
+      s.append(imgs[i]);
       card.prepend(s);
     });
+    coversReady = true;
     if (openIdx >= 0) fillEnd(openIdx);
   }
 
+  function nextLink(i, label) {
+    const n = WORKS[i], a = document.createElement('a');
+    a.className = 'r-next'; a.href = hashOf(i);
+    a.innerHTML = `<span class="r-next-text"><small>${label}</small><b>${n.no}</b><strong>${n.title}</strong></span><span class="r-thumb"></span><i aria-hidden="true">→</i>`;
+    a.querySelector('.r-thumb').append(coverImg(i));
+    arrowFlow(a.querySelector('i'), a);
+    a.addEventListener('click', e => { e.preventDefault(); switchWork(i); });
+    return a;
+  }
+  function downloadLink() {
+    const dl = document.createElement('a');
+    dl.className = 'r-download'; dl.href = PDF_URL; dl.innerHTML = '<span>下载完整作品集 PDF</span><i aria-hidden="true">↓</i>';
+    const dlText = dl.firstChild, dlArrow = dl.lastChild;
+    arrowFlow(dlArrow, dl);
+    const dlShow = st => { dlText.textContent = st === 'ok' ? '已开始下载' : st === 'fail' ? '下载没有成功，请再试一次' : '下载完整作品集 PDF'; dlArrow.hidden = !!st; };
+    bindDownload(dl, st => {
+      dlShow(st);
+      if (st === 'ok') setTimeout(() => dlShow(''), 2400);
+    });
+    return dl;
+  }
   function fillEnd(i) {
     rEnd.textContent = '';
-    if (i < WORKS.length - 1) {
-      const n = WORKS[i + 1], a = document.createElement('a');
-      a.className = 'r-next'; a.href = hashOf(i + 1);
-      a.innerHTML = `<span class="r-next-text"><small>下一个作品</small><b>${n.no}</b><strong>${n.title}</strong></span><span class="r-thumb"></span><i aria-hidden="true">→</i>`;
-      a.querySelector('.r-thumb').append(coverCanvas(i + 1));
-      arrowFlow(a.querySelector('i'), a);
-      a.addEventListener('click', e => { e.preventDefault(); switchWork(i + 1); });
-      rEnd.append(a);
-    } else {
+    if (i === ABOUT) rEnd.append(nextLink(0, '从第一个作品开始看'));
+    else if (i < PROJECTS - 1) rEnd.append(nextLink(i + 1, '下一个作品'));
+    else {
       const p = document.createElement('p');
       p.className = 'r-done'; p.textContent = '四个作品已全部看完';
-      rEnd.append(p);
-      const dl = document.createElement('a');
-      dl.className = 'r-download'; dl.href = PDF_URL; dl.innerHTML = '<span>下载完整作品集</span><i aria-hidden="true">↓</i>';
-      const dlText = dl.firstChild, dlArrow = dl.lastChild;
-      arrowFlow(dlArrow, dl);
-      const dlShow = st => { dlText.textContent = st === 'ok' ? '已开始下载' : st === 'fail' ? '下载没有成功，请再试一次' : '下载完整作品集'; dlArrow.hidden = !!st; };
-      bindDownload(dl, st => {
-        dlShow(st);
-        if (st === 'ok') setTimeout(() => dlShow(''), 2400);
-      });
-      rEnd.append(dl);
+      rEnd.append(p, downloadLink());
     }
     const back = document.createElement('button');
-    back.className = 'r-back'; back.textContent = '回到目录';
+    back.className = 'r-back'; back.textContent = i === ABOUT ? '返回' : '回到目录';
     back.addEventListener('click', () => closeWork());
     rEnd.append(back);
   }
@@ -547,9 +607,8 @@
     $('rTitle').textContent = work.title;
     $('rOf').textContent = work.pages.length;
     rPages.innerHTML = work.pages.map((alt, p) =>
-      `<figure class="r-page"><img src="${sheetOf(i, p)}" alt="${alt}" width="2560" height="1440" decoding="async" style="object-position:${slotPos(p)}"></figure>`
+      `<figure class="r-page"><img src="${pageSrc(i, p, 1280)}" srcset="${srcsetOf(i, p)}" sizes="${PAGE_SIZES}" alt="${alt}" width="3840" height="2160" decoding="async" data-p="${p}" ${p < 2 ? 'fetchpriority="high"' : 'loading="lazy"'}></figure>`
     ).join('');
-    rPages.querySelectorAll('img').forEach(img => img.decode().catch(() => {}));
     fillEnd(i);
   }
   const pageEls = () => [...rPages.querySelectorAll('.r-page')];
@@ -569,7 +628,7 @@
   function flight(i, from, to) {
     const el = document.createElement('div');
     el.className = 'morph';
-    el.append(coverCanvas(i));
+    el.append(coverImg(i));
     document.body.append(el);
     const box = r => ({ left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px`, borderRadius: `${r.radius}px` });
     const anim = el.animate([box(from), box(to)], { duration: MORPH_MS, easing: MORPH_EASE, fill: 'both' });
@@ -583,15 +642,16 @@
     if (busy || openIdx >= 0) return;
     busy = true;
     openIdx = i;
-    returnFocus = cards[i];
+    syncNav();
+    returnFocus = cards[i] || document.activeElement;
     document.body.classList.add('reading');
     buildPages(i);
     reader.hidden = false;
     reader.scrollTop = savedTop[i] || 0;
     syncProgress();
     if (push) pushHash(i);
-    const motion = !instant && !reduced.matches && coversImg;
     const card = cards[i];
+    const motion = !instant && !reduced.matches && coversReady && card;
     const target = currentPageEl();
     if (motion) {
       card.style.visibility = 'hidden';
@@ -617,7 +677,7 @@
     busy = true;
     savedTop[i] = reader.scrollTop + reader.clientHeight / 2 < rEnd.offsetTop ? reader.scrollTop : 0;
     const card = cards[i];
-    if (!reduced.matches && coversImg) {
+    if (!reduced.matches && coversReady && card) {
       const page = currentPageEl();
       const f = flight(i, rectOf(page, pageRadius(page)), rectOf(card, 20));
       card.style.visibility = 'hidden';
@@ -630,13 +690,14 @@
       f.el.remove();
     } else {
       reader.classList.remove('show', 'pages-in');
-      card.style.visibility = '';
+      if (card) card.style.visibility = '';
       await sleep(reduced.matches ? 0 : 260);
     }
     reader.hidden = true;
     rPages.textContent = '';
     document.body.classList.remove('reading');
     openIdx = -1;
+    syncNav();
     busy = false;
     dirty = true;
     if (returnFocus) returnFocus.focus({ preventScroll: true });
@@ -656,7 +717,8 @@
     reader.classList.remove('pages-in');
     await sleep(reduced.matches ? 0 : 240);
     openIdx = i;
-    returnFocus = cards[i];
+    syncNav();
+    if (cards[i]) returnFocus = cards[i];
     buildPages(i);
     reader.scrollTop = 0;
     syncProgress();
@@ -680,16 +742,27 @@
       e.preventDefault();
       openWork(i);
     });
-    const warm = () => { if (!card.dataset.warm) { card.dataset.warm = 1; new Image().src = sheetOf(i, 0); } };
+    // 鼠标移上卡片就预取第 1 页（与阅读页同样的 srcset/sizes，浏览器挑中的那一档会直接命中缓存）
+    const warm = () => { if (!card.dataset.warm) { card.dataset.warm = 1; const im = new Image(); im.sizes = PAGE_SIZES; im.srcset = srcsetOf(i, 0); } };
     card.addEventListener('pointerenter', warm);
     card.addEventListener('focus', warm);
   });
 
+  // 顶部导航「关于」：打开个人介绍（在作品里点则直接切换过去）
+  document.querySelectorAll('[data-about]').forEach(b => b.addEventListener('click', e => {
+    e.preventDefault();
+    if (openIdx < 0) openWork(ABOUT);
+    else if (openIdx !== ABOUT) switchWork(ABOUT);
+  }));
+
   let zoomFrom = null;
   function openZoom(img) {
+    // 放大查看直接上 3840 超清图，先用已加载的那一档垫底
     zImg.src = img.currentSrc || img.src;
+    const hi = new Image();
+    hi.onload = () => { if (zoomFrom === img) zImg.src = hi.src; };
+    hi.src = pageSrc(openIdx, +img.dataset.p || 0, 3840);
     zImg.alt = img.alt;
-    zImg.style.objectPosition = img.style.objectPosition;
     zoomer.hidden = false;
     zScroll.scrollLeft = 0;
     zoomFrom = img;
@@ -863,8 +936,8 @@
     const sceneTex = [0, 1, 2].map(() => { const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t); texParams(); return t; });
     const titleCanvas = document.createElement('canvas'), tc = titleCanvas.getContext('2d');
     const TITLE_PARTS = [
-      ['.title .l', [[0, '#111a4d'], [.45, '#1d2a66'], [.78, '#33508e'], [1, '#7d97c4']]],
-      ['.title .r', [[0, '#9fb2d6'], [.22, '#5b4aa0'], [.48, '#7a2c8c'], [.7, '#b51d7d'], [1, '#4c1b6e']]],
+      ['.title .l', [[0, '#0d1638'], [.42, '#1b2c5e'], [.76, '#36507f'], [1, '#86a0c4']]],
+      ['.title .r', [[0, '#a9b9d0'], [.2, '#9a7a46'], [.46, '#6e4c1d'], [.7, '#b9873a'], [1, '#4a3114']]],
     ].map(([sel, stops]) => [document.querySelector(sel), stops]);
     function drawTitle() {
       tc.setTransform(1, 0, 0, 1, 0, 0);
@@ -1019,7 +1092,7 @@
     return { frame };
   })();
 
-  window.phoenixPortfolio = { state: () => ({ mode: useImg ? 'img' : 'blob', w, t: timeAtW(w), frame: lastFrame / 2, settled, hold, zoom, tween: tween ? tween.stage : null, loadedFrames, masks: masks.filter(Boolean).length, decoded: [...decoded.values()].filter(Boolean).length, vw, vh, openIdx, busy }) };
+  window.phoenixPortfolio = { state: () => ({ tier, loadedMB: +(loadedBytes / 1048576).toFixed(1), started, mode: useImg ? 'img' : 'blob', w, t: timeAtW(w), frame: lastFrame / 2, settled, hold, zoom, tween: tween ? tween.stage : null, loadedFrames, masks: masks.filter(Boolean).length, decoded: [...decoded.values()].filter(Boolean).length, vw, vh, openIdx, busy }) };
 
   layout();
   if (deepWork >= 0) { w = stageW[CONTENTS_STAGE]; settled = CONTENTS_STAGE; openWork(deepWork, { instant: true, push: false }); }
