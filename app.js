@@ -8,6 +8,7 @@
   // 其余情况先拉前 12 帧实测网速，补齐开场帧预计要超过 9 秒才自动降到 720p（浏览器自报的网速常常不准，所以以实测为准）
   const conn = navigator.connection || {};
   let tier = conn.saveData || /2g$/.test(conn.effectiveType || '') || (navigator.deviceMemory && navigator.deviceMemory <= 2) ? 'sd' : 'hd';
+  const tierLocked = tier === 'sd';         // 省流 / 低内存设备：始终 720p，不在后台升级
   const TIER_PROBE = 12, TIER_BUDGET = 9;
   const SRC_W = 1920, SRC_H = 1080;        // 画面的逻辑尺寸（16:9），两档素材都按它铺满；绘制时用图片自身像素尺寸
   // 神凰前景抠像只做标题可见的前段：masks/NNN.webp 上下两格依次是第 2N、2N+1 帧（960×540，按 1080p 原帧引导滤波精修边缘），透明度即前景神凰与鎏金绶带。
@@ -159,13 +160,37 @@
     await Promise.all(Array.from({ length: 8 }, worker));
     progressLoad(true);
     loadStills();
+    if (tier === 'sd' && !tierLocked && !useImg) upgradeHD();
+  }
+
+  // 网速慢时先用 720p 起播；720p 全部到齐后，在后台从当前画面往两边把序列帧换成 1080p（4 路并发，不抢别的请求），
+  // 换好一帧就重新解码替换，画面在不知不觉中变清楚
+  async function upgradeHD() {
+    const cur = clamp(lastFrame >> 1, 0, LAST_FRAME), order = [];
+    for (let d = 0; d <= LAST_FRAME; d++) for (const i of d ? [cur + d, cur - d] : [cur]) if (i >= 0 && i <= LAST_FRAME) order.push(i);
+    let next = 0;
+    const worker = async () => {
+      while (next < order.length) {
+        const i = order[next++], got = [];
+        await loadImage(`frames/hd/${pad(i, 4)}.webp`, got, 0, 2);
+        if (!got[0]) continue;
+        frames[i * 2] = got[0];
+        const key = slotKey(i * 2);
+        if (decoded.get(key)) createImageBitmap(got[0]).then(bmp => {
+          const old = decoded.get(key);
+          if (old) { decoded.set(key, bmp); old.close(); dirty = true; } else bmp.close();
+        }).catch(() => {});
+      }
+    };
+    await Promise.all(Array.from({ length: 4 }, worker));
+    tier = 'hd';
   }
 
   // 超清静帧：首页定格那一帧、关于我 / 目录 / 结束共用的末帧，是停下来盯着看的画面，另备 2880 宽的版本。
-  // 序列帧都到齐后再加载；屏幕本身不够大（物理像素宽不到 2000）就不加载
+  // 序列帧都到齐后再加载（720p 起播时也加载，停下来看的画面始终是超清）；屏幕本身不够大（物理像素宽不到 2000）或省流设备不加载
   const STILLS = [READY_FRAME, LAST_FRAME], stills = new Map();
   async function loadStills() {
-    if (tier !== 'hd' || Math.max(innerWidth, innerHeight) * Math.min(devicePixelRatio || 1, 2) < 2000) return;
+    if (tierLocked || Math.max(innerWidth, innerHeight) * Math.min(devicePixelRatio || 1, 2) < 2000) return;
     const got = [];
     await Promise.all(STILLS.map(n => loadImage(`frames/still/${pad(n, 4)}.webp`, got, n, 2)));
     for (const n of STILLS) {
