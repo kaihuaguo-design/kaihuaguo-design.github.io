@@ -27,6 +27,9 @@
   const ABOUT_T = 13.2;                    // 神凰走到这一秒（身体大半出画）时「关于我」开始入场
   // 姓名和联系方式：填上就会显示在结尾页，点击可复制；留空则不显示
   const CONTACT = { name: '郭凯华', email: '', wechat: '' };
+  // 访问量和下载量：GoatCounter（免费、无 Cookie）。不加载任何统计脚本，只发一个 1 像素的计数请求；
+  // 本机预览（localhost / 双击打开）不计数。到 https://www.goatcounter.com 注册时站点代码填 jianhua-portfolio 即可生效，留空则关闭
+  const STATS = 'https://jianhua-portfolio.goatcounter.com/count';
   // 播放速度（相对原速）。点击后为了让目录早点出来：凝视段 2 倍速带过；转身段 1.35 倍；走出画面段 0.95 倍
   const rate = t => lerp(1.15, 0.92, smoothstep(10.8, 12.0, t)) * (1 + smoothstep(7.4, 7.7, t) * lerp(1, 0.38, smoothstep(9.0, 9.8, t)) * (1 - smoothstep(10.4, 11.4, t)));
   const LAST_SLOT = LAST_FRAME * 2;
@@ -36,7 +39,7 @@
   const CARD_E = 0.5;                      // 切到目录的过程走过一半时，四张卡片开始依次升起
   const CARD_GAP = 130;                    // 快进或从结尾页回来时几张会同时到点：按这个间隔（毫秒）排队
   const READY_FRAME = 178;                 // 开场（远空 → 近景凝视）用到的最后一帧
-  const READY_STRIDE = 4;                  // 快速起播：先隔 4 帧拉一遍开场骨架帧，再回头补齐中间帧
+  const READY_STRIDE = 6;                  // 快速起播：先隔 6 帧拉一遍开场骨架帧（约 2.3 MB + 遮罩 1.3 MB），再回头补齐中间帧
 
   const film = document.getElementById('film'), fctx = film.getContext('2d');
   const front = document.getElementById('front'), tctx = front.getContext('2d');
@@ -204,6 +207,7 @@
     document.getElementById('loaderBar').style.width = `${Math.round(Math.min(1, ratio) * 100)}%`;
     if (!started && (all || introOk || (deepWork >= 0 && frames[LAST_SLOT]))) {
       started = true; document.body.classList.add('ready'); dirty = true;
+      afterStart();
       keepDecoded(deepWork >= 0 ? LAST_SLOT : Math.max(0, lastFrame), dir);
       if (deepWork < 0) {
         if (reduced.matches) w = 0;
@@ -276,6 +280,25 @@
       if (isImg(frames[i + d])) return frames[i + d];
     }
     return null;
+  }
+
+  // 开场画面能播了以后，才去拉不急的图（目录卡片封面、关于我的肖像），不和开场序列帧抢网速；同时记一次访问
+  let afterDone = false;
+  function afterStart() {
+    if (afterDone) return;
+    afterDone = true;
+    setTimeout(() => {
+      loadCovers();
+      document.querySelectorAll('img[data-srcset]').forEach(img => { img.srcset = img.dataset.srcset; img.src = img.dataset.src; img.removeAttribute('data-srcset'); });
+      stat(location.pathname, document.title);
+    }, 0);
+  }
+  function stat(path, title) {
+    if (!STATS || location.protocol === 'file:' || /^(localhost|127\.|\[::1\]|0\.0\.0\.0)/.test(location.hostname) || navigator.webdriver) return;
+    const event = path !== location.pathname;
+    const q = new URLSearchParams({ p: path, t: title, s: `${screen.width},${screen.height},${devicePixelRatio || 1}`, rnd: Math.random().toString(36).slice(2) });
+    if (event) q.set('e', 'true'); else if (document.referrer) q.set('r', document.referrer);
+    try { new Image().src = `${STATS}?${q}`; } catch {}
   }
 
   // ---------- 位置与布局 ----------
@@ -856,6 +879,7 @@
   function bindDownload(link, show) {
     link.setAttribute('download', PDF_NAME);
     link.addEventListener('click', async e => {
+      stat('download-pdf', '下载 PDF 作品集');
       if (!window.claude || !window.claude.use) { show('ok'); return; }
       e.preventDefault();
       try {
@@ -1167,5 +1191,5 @@
   if (deepWork >= 0) { w = stageW[CONTENTS_STAGE]; settled = CONTENTS_STAGE; openWork(deepWork, { instant: true, push: false }); }
   requestAnimationFrame(tick);
   loadAll();
-  loadCovers();
+  if (deepWork >= 0) afterStart();
 })();
