@@ -347,7 +347,19 @@
     oy = (vh - SRC_H * scale) / 2;
     const titleW = document.querySelector('.title .l').offsetWidth + document.querySelector('.title .r').offsetWidth;
     splitMax = (vw / 2 - titleW * TITLE_NEAR / 2 - vw * .03) / TITLE_NEAR;
+    tuneGlass();
     dirty = true;
+  }
+
+  // 结束页 YOU 玻璃字：滤镜里的模糊半径、斜面高度、偏移都按字号等比换算，大屏小屏质感一致
+  function tuneGlass() {
+    const el = document.querySelector('.ty-b > span'), f = document.getElementById('tyGlass');
+    if (!el || !f) return;
+    const fs = parseFloat(getComputedStyle(el).fontSize) || 160;
+    f.querySelectorAll('[data-scale]').forEach(n => n.dataset.scale.split(';').forEach(p => {
+      const [attr, k] = p.split(':');
+      n.setAttribute(attr, (fs * +k).toFixed(2));
+    }));
   }
 
   // ---------- 绘制：底层画整帧，上层用 2D Canvas source-in 画抠出的神凰，让神凰挡在标题前面 ----------

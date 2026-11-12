@@ -209,9 +209,10 @@ a{color:inherit;text-decoration:none}
 .ty{position:relative;margin:0;display:flex;align-items:baseline;gap:.2em;font-family:var(--serif);font-weight:400;font-size:calc(var(--u) * 14.9);line-height:.8;letter-spacing:-.05em;white-space:nowrap}
 .ty-a>span{background:linear-gradient(104deg,#0d1638 0%,#1d2f63 52%,#3d5a8e 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
 .ty-b{--d:170ms}
-.ty-b>span{padding-right:.07em;color:transparent;-webkit-text-stroke:1.3px #21346acc;background:linear-gradient(112deg,#86aee6e0 0%,#fffffff5 20%,#c3d8f5d9 36%,#efcf90f0 54%,#fffffffa 68%,#93b6e8e0 84%,#e3bd76f0 100%) 0 0/240% 100%;-webkit-background-clip:text;background-clip:text;filter:drop-shadow(0 .03em .05em #1d264433)}
-.in .ty-b>span{animation:tyShine 9s ease-in-out 1.4s infinite alternate}
-@keyframes tyShine{to{background-position:100% 0}}
+/* YOU：通透的玻璃字。字身是很淡的冰蓝—粉—金渐变，立体感全靠 #tyGlass 滤镜（斜面高光、内阴影、柔亮边、投影），没有描边 */
+.fx{position:absolute;width:0;height:0;overflow:hidden}
+.ty-b>span{padding-right:.07em;color:transparent;background:linear-gradient(115deg,#a9c6f5b3 0%,#f4f8ffc4 24%,#f1bfd8a6 46%,#ffdca3b3 64%,#b5cdf7b3 100%);-webkit-background-clip:text;background-clip:text;filter:url(#tyGlass)}
+.ty-wrap{will-change:transform}
 /* 倒影：同一行字上下翻转，越往下越淡 */
 .ty-ref{position:absolute;left:0;top:100%;margin-top:-.135em;transform:scaleY(-1) translate3d(calc(var(--px) * 10px),0,0);opacity:0;-webkit-mask-image:linear-gradient(to top,#000 0%,#0000 58%);mask-image:linear-gradient(to top,#000 0%,#0000 58%);filter:blur(1.4px);pointer-events:none;transition:opacity .35s}
 .in .ty-ref{opacity:.3;transition:opacity 1.6s ease .9s}
@@ -236,6 +237,14 @@ a{color:inherit;text-decoration:none}
   .ab-card{left:auto;right:7%;top:calc(14% + 38px);width:29vw}
   .ab-card figcaption{display:none}
   .ab-text{left:7%;right:7%;top:calc(14% + 42px)}
+  /* 手机竖屏：凤尾和星尘正好落在正文后面，正文垫一块磨砂玻璃卡片（跟着本页一起淡入淡出），标题区是天空，不用垫 */
+  .ab-body{position:relative;isolation:isolate;margin:5vw -4vw 0;padding:4.5vw 4vw 4.5vw}
+  .ab-body>.ab-role{margin-top:0}
+  .ab-body>.ab-say{margin-top:5vw}
+  .ab-card{z-index:2}
+  .ab-body:before{content:"";position:absolute;inset:0;z-index:-1;border-radius:18px;background:linear-gradient(180deg,#f7faffcc 0%,#eef3fbe6 100%);-webkit-backdrop-filter:blur(18px) saturate(1.2);backdrop-filter:blur(18px) saturate(1.2);box-shadow:0 0 0 1px #ffffffc7,0 20px 44px -22px #1d264473;opacity:0;transform:translate3d(0,18px,0);transition:opacity .35s ease,transform .45s cubic-bezier(.4,0,1,1)}
+  .in .ab-body:before{opacity:1;transform:none;transition:opacity .9s ease .2s,transform 1.2s cubic-bezier(.16,1,.3,1) .2s}
+  .ab-body .ab-role,.ab-body .ab-say,.ab-body .ab-time li,.ab-body .ab-note{text-shadow:none}
   .ab-en>span{font-size:10vw}
   .ab-name{margin-top:2.6vw}.ab-name>span{font-size:7.6vw}
   .ab-role{flex-direction:column;gap:3px;margin-top:2.4vw;font-size:11px}
@@ -336,7 +345,7 @@ body:has(.reader.show) .nav button[aria-current="true"]:after{background:#fff;bo
 }
 /* 窗口较窄时作品名放到导航下面一行，避免和导航重叠 */
 @media (max-width:900px) and (min-aspect-ratio:4/5){.reader{--bar:calc(4vh + 68px)}.r-bar{padding-top:calc(4vh + 36px);padding-bottom:6px}}
-@media (prefers-reduced-motion:reduce){.explore *,.explore *:before,.explore *:after,.af .af-in,.ab-tilt,.ab-sheen,.ty-b>span{animation:none!important}.card,.explore *,.cards li,.cover,.reader,.r-pages,.r-end,.morph,.rv,.rt>span,.ab-card,.ty-ref{transition:none!important}.cards li.show .card{animation:none!important}}
+@media (prefers-reduced-motion:reduce){.explore *,.explore *:before,.explore *:after,.af .af-in,.ab-tilt,.ab-sheen{animation:none!important}.card,.explore *,.cards li,.cover,.reader,.r-pages,.r-end,.morph,.rv,.rt>span,.ab-card,.ty-ref{transition:none!important}.cards li.show .card{animation:none!important}}
 
 /* 箭头流动：箭头顺着自己指的方向滑出，同一支从反方向滑进来补位 */
 .af{display:inline-grid;clip-path:inset(0)}

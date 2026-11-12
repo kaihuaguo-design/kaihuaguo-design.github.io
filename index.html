@@ -55,15 +55,17 @@
       </figure>
       <div class="ab-text">
         <h2 id="aboutTitle"><span class="ab-en rt" aria-hidden="true"><span>ABOUT ME</span></span><span class="ab-name rt"><span>郭凯华</span></span></h2>
-        <p class="ab-role"><span>UX / 产品体验设计</span><span>中国传媒大学（自考）</span></p>
-        <p class="ab-say"><span>我关注复杂业务中的真实需求</span><span>通过清晰的信息架构，顺畅的交互和统一的视觉表达</span><span>让产品更易理解，更易使用</span></p>
-        <ol class="ab-time">
-          <li><time>2025/11 — 至今</time><span>测试空间外派滴滴</span></li>
-          <li><time>2024/02 — 2025/11</time><span>中电金信外派美团</span></li>
-          <li><time>2021/07 — 2024/01</time><span>软通动力外派京东</span></li>
-          <li><time>2017/09 — 2021/04</time><span>北京百星电子系统有限公司</span></li>
-        </ol>
-        <p class="ab-note">探索 AI 辅助设计，让构思、验证与交付更紧密的衔接</p>
+        <div class="ab-body">
+          <p class="ab-role"><span>UX / 产品体验设计</span><span>中国传媒大学（自考）</span></p>
+          <p class="ab-say"><span>我关注复杂业务中的真实需求</span><span>通过清晰的信息架构，顺畅的交互和统一的视觉表达</span><span>让产品更易理解，更易使用</span></p>
+          <ol class="ab-time">
+            <li><time>2025/11 — 至今</time><span>测试空间外派滴滴</span></li>
+            <li><time>2024/02 — 2025/11</time><span>中电金信外派美团</span></li>
+            <li><time>2021/07 — 2024/01</time><span>软通动力外派京东</span></li>
+            <li><time>2017/09 — 2021/04</time><span>北京百星电子系统有限公司</span></li>
+          </ol>
+          <p class="ab-note">探索 AI 辅助设计，让构思、验证与交付更紧密的衔接</p>
+        </div>
       </div>
     </section>
 
@@ -84,6 +86,30 @@
     <!-- 04 结束：THANK 实心、YOU 玻璃字立在云海地平线上，下面带倒影；文字与下载分两栏错落入场 -->
     <section class="end" aria-labelledby="endTitle">
       <p class="label end-label"><span>PORTFOLIO / 2026</span><span>END.</span></p>
+      <!-- YOU 的玻璃质感：按字形算出斜面，做高光、内阴影、柔和的亮边和投影（不再用生硬的描边）。尺寸参数由 app.js 按字号换算 -->
+      <svg class="fx" width="0" height="0" aria-hidden="true" focusable="false">
+        <filter id="tyGlass" x="-8%" y="-14%" width="116%" height="140%" color-interpolation-filters="sRGB">
+          <feComponentTransfer in="SourceAlpha" result="m"><feFuncA type="linear" slope="30"/></feComponentTransfer>
+          <feGaussianBlur in="m" stdDeviation="4" data-scale="stdDeviation:.03" result="bump"/>
+          <feSpecularLighting in="bump" surfaceScale="5" data-scale="surfaceScale:.026" specularConstant="1.25" specularExponent="18" lighting-color="#fff" result="spec"><feDistantLight azimuth="235" elevation="52"/></feSpecularLighting>
+          <feComposite in="spec" in2="m" operator="in" result="hi"/>
+          <feMorphology in="m" operator="erode" radius="1.5" data-scale="radius:.009" result="er"/>
+          <feGaussianBlur in="er" stdDeviation="1.5" data-scale="stdDeviation:.012" result="erb"/>
+          <feComposite in="m" in2="erb" operator="out" result="rimA"/>
+          <feFlood flood-color="#ffffff" flood-opacity=".8"/>
+          <feComposite in2="rimA" operator="in" result="rim"/>
+          <feOffset in="m" dx="-3" dy="-4" data-scale="dx:-.02;dy:-.028" result="mo"/>
+          <feGaussianBlur in="mo" stdDeviation="3" data-scale="stdDeviation:.022" result="mob"/>
+          <feComposite in="m" in2="mob" operator="out" result="innerA"/>
+          <feFlood flood-color="#23427f" flood-opacity=".62"/>
+          <feComposite in2="innerA" operator="in" result="inner"/>
+          <feGaussianBlur in="m" stdDeviation="6" data-scale="stdDeviation:.035" result="dsb"/>
+          <feOffset in="dsb" dy="6" data-scale="dy:.03" result="dso"/>
+          <feFlood flood-color="#1d2644" flood-opacity=".22"/>
+          <feComposite in2="dso" operator="in" result="drop"/>
+          <feMerge><feMergeNode in="drop"/><feMergeNode in="SourceGraphic"/><feMergeNode in="inner"/><feMergeNode in="rim"/><feMergeNode in="hi"/></feMerge>
+        </filter>
+      </svg>
       <div class="ty-wrap">
         <h2 id="endTitle" class="ty" aria-label="THANK YOU"><span class="ty-a rt" aria-hidden="true"><span>THANK</span></span><span class="ty-b rt" aria-hidden="true"><span>YOU</span></span></h2>
         <div class="ty ty-ref" aria-hidden="true"><span class="ty-a rt"><span>THANK</span></span><span class="ty-b rt"><span>YOU</span></span></div>
