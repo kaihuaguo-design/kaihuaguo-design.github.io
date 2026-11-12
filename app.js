@@ -14,14 +14,17 @@
   const MASK_LAST = 241, MASK_W = 960, MASK_H = 540;
   // 开场：页面打开后，神凰从远空云雾滑翔落地走到近景（0 → INTRO_T 秒），近景就是首页的默认位置
   const INTRO_T = 7.4, INTRO_DELAY = 400;
-  // 吸附点（视频秒数）。hold：停在这里时定格，镜头极慢地推向神凰双眸之间（比例坐标），zoom 为推近幅度
+  // 吸附点（视频秒数）。cam：这一幕的机位 [放大倍数, 锚点x, 锚点y]（比例坐标），幕与幕之间镜头平滑推移过去；
+  // zoom：停在这一幕时，镜头再极慢地往锚点推近的幅度
   const STAGES = [
-    { t: INTRO_T, hold: [0.5, 0.30], zoom: 0.045 },  // 01 首页：近景凝视镜头，标题分开，EXPLORE 引导
-    { t: DURATION },                                  // 02 神凰转身走出左画面，露出凤尾与目录
-    { t: DURATION, hold: [0.5, 0.52], zoom: 0.035 },  // 03 结尾：同一片冰原缓慢推近，目录换成 THANK YOU 和下载
+    { t: INTRO_T, cam: [1, 0.5, 0.30], zoom: 0.045 },     // 01 首页：近景凝视镜头，标题分开，EXPLORE 引导
+    { t: DURATION, cam: [1, 0.16, 0.80], zoom: 0.04 },    // 02 关于我：神凰转身走出左画面，凤尾留在左下，肖像卡与文字入场
+    { t: DURATION, cam: [1.07, 0.9, 0.42], zoom: 0.02 },  // 03 目录：镜头向右推，凤尾退到画外，卡片升起
+    { t: DURATION, cam: [1.13, 0.62, 0.6], zoom: 0.03 },  // 04 结束：再推近到云海地平线，THANK YOU 立在上面
   ];
-  const CONTENTS_STAGE = 1, END_STAGE = 2;
-  const END_W = 0.9;                       // 目录到结尾的切换时长（秒），这段画面不动，只换文字
+  const ABOUT_STAGE = 1, CONTENTS_STAGE = 2, END_STAGE = 3;
+  const SWAP_W = 0.9;                      // 关于我 → 目录 → 结束 每次切换的时长（秒）：视频已播完，镜头推移 + 换文字
+  const ABOUT_T = 13.2;                    // 神凰走到这一秒（身体大半出画）时「关于我」开始入场
   // 姓名和联系方式：填上就会显示在结尾页，点击可复制；留空则不显示
   const CONTACT = { name: '郭凯华', email: '', wechat: '' };
   // 播放速度（相对原速）。点击后为了让目录早点出来：凝视段 2 倍速带过；转身段 1.35 倍；走出画面段 0.95 倍
@@ -30,8 +33,7 @@
   const hasSlot = s => s >= 0 && s <= LAST_SLOT && (s & 1) === 0;
   const HOLD_SECS = 7;                     // 定格推近的时长
   const FAST_MS = 1000;                    // 快进时剩下的动作最多播多久
-  // 四张卡片随神凰转身走出画面依次升起
-  const CARD_T = [12.35, 12.7, 13.05, 13.4];
+  const CARD_E = 0.5;                      // 切到目录的过程走过一半时，四张卡片开始依次升起
   const CARD_GAP = 130;                    // 快进或从结尾页回来时几张会同时到点：按这个间隔（毫秒）排队
   const READY_FRAME = 178;                 // 开场（远空 → 近景凝视）用到的最后一帧
   const READY_STRIDE = 4;                  // 快速起播：先隔 4 帧拉一遍开场骨架帧，再回头补齐中间帧
@@ -40,7 +42,7 @@
   const front = document.getElementById('front'), tctx = front.getContext('2d');
   const root = document.documentElement;
   const navButtons = [...document.querySelectorAll('[data-nav]')];
-  const explore = document.querySelector('.explore'), contents = document.querySelector('.contents'), endEl = document.querySelector('.end');
+  const explore = document.querySelector('.explore'), contents = document.querySelector('.contents'), endEl = document.querySelector('.end'), aboutEl = document.querySelector('.about');
   const cardItems = [...document.querySelectorAll('.cards li')], cardOn = cardItems.map(() => false);
   let cardFree = 0;
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
@@ -238,7 +240,9 @@
   const TITLE_NEAR = .58, TITLE_PORTRAIT = .88;
   const W0 = wallAt(INTRO_T);
   const stageW = STAGES.map(s => wallAt(s.t) - W0);
-  stageW[END_STAGE] = stageW[CONTENTS_STAGE] + END_W;
+  stageW[CONTENTS_STAGE] = stageW[ABOUT_STAGE] + SWAP_W;
+  stageW[END_STAGE] = stageW[CONTENTS_STAGE] + SWAP_W;
+  const W_MAX = stageW[END_STAGE];
   const timeAtW = w => timeAtWall(W0 + w);
   const stageAt = w => stageW.reduce((best, s, i) => Math.abs(s - w) < Math.abs(stageW[best] - w) ? i : best, 0);
 
@@ -284,13 +288,14 @@
 
   // 文字跟着镜头：标题在神凰走近时向两边分开、微缩，转身走出时目录从上下浮现
   let lastScene = '', navScene = '0';
-  const aboutBtn = document.querySelector('[data-about]');
-  // 导航高亮：打开个人介绍时亮「关于」，否则跟随当前场景
+  // 导航高亮跟随当前场景
   function syncNav() {
-    const about = typeof openIdx !== 'undefined' && openIdx === ABOUT;
-    navButtons.forEach(b => b.setAttribute('aria-current', String(!about && b.dataset.nav === navScene)));
-    if (aboutBtn) aboutBtn.setAttribute('aria-current', String(about));
+    navButtons.forEach(b => b.setAttribute('aria-current', String(b.dataset.nav === navScene)));
   }
+  // 入场排队：给「关于我」「结束」两页里的正文元素编上序号（--i），CSS 按序号错开时间
+  [[aboutEl, '.ab-role,.ab-say>span,.ab-time>li,.ab-note', 4], [endEl, '.end-say>strong,.end-say>span,.end-contact,.dl,.dl-info,.again', 5]].forEach(([el, sel, from]) =>
+    el.querySelectorAll(sel).forEach((x, k) => { x.classList.add('rv'); x.style.setProperty('--i', from + k); }));
+  const setState = (el, st) => { if (el.dataset.st !== st) { el.dataset.st = st; el.classList.toggle('in', st === 'in'); el.classList.toggle('out', st === 'out'); } };
   function updateText(t) {
     const css = (k, v) => root.style.setProperty(k, v);
     const u = smoothstep(2.4, 7.0, t);
@@ -306,15 +311,16 @@
     const leaving = !!tween && tween.stage !== 0 && tween.to > w;
     explore.classList.toggle('pulse', ex > .6 && !leaving);
     explore.classList.toggle('go', leaving && ex > .02);
-    const co = smoothstep(10.8, 12.5, t);
-    const e = clamp((w - stageW[CONTENTS_STAGE]) / END_W, 0, 1);
-    const coEnd = co * (1 - smoothstep(0, .55, e));
-    css('--contents-o', coEnd.toFixed(3));
-    css('--head-y', `${((1 - co) * 30 - e * 26).toFixed(1)}px`);
-    contents.classList.toggle('on', co > .6 && e < .5);
+    // e1：关于我 → 目录 走了多少（0–1）；e2：目录 → 结束 走了多少
+    const e1 = clamp((w - stageW[ABOUT_STAGE]) / SWAP_W, 0, 1), e2 = clamp((w - stageW[CONTENTS_STAGE]) / SWAP_W, 0, 1);
+    setState(aboutEl, e1 > .14 ? 'out' : t > ABOUT_T ? 'in' : '');
+    const co = smoothstep(.3, .85, e1);
+    css('--contents-o', (co * (1 - smoothstep(0, .55, e2))).toFixed(3));
+    css('--head-y', `${((1 - co) * 30 - e2 * 26).toFixed(1)}px`);
+    contents.classList.toggle('on', co > .6 && e2 < .5);
     const nowMs = performance.now();
     cardItems.forEach((li, k) => {
-      const on = t > CARD_T[k] && e < .22;
+      const on = e1 > CARD_E && e2 < .22;
       if (on === cardOn[k]) return;
       cardOn[k] = on;
       const wait = on ? Math.max(0, cardFree - nowMs) : 0;
@@ -323,18 +329,17 @@
       li.style.setProperty('--d', `${Math.round(wait)}ms`);
       li.classList.toggle('show', on);
     });
-    const eo = smoothstep(.4, 1, e);
-    css('--end-o', eo.toFixed(3));
-    css('--end-y', `${((1 - eo) * 30).toFixed(1)}px`);
-    endEl.classList.toggle('on', e > .7);
-    css('--progress', (t / DURATION).toFixed(4));
-    const scene = e > .5 ? 'end' : t > 11.2 ? 'contents' : 'portfolio';
+    setState(endEl, e2 > .5 ? 'in' : '');
+    css('--progress', ((W0 + w) / (W0 + W_MAX)).toFixed(4));
+    const scene = e2 > .5 ? 'end' : e1 > .5 ? 'contents' : t > 11.6 ? 'about' : 'portfolio';
     if (scene !== lastScene) {
       lastScene = scene;
+      const down = '继续下滑' + afHTML('↓', AF_DIR['↓'], 'loop');
       const info = {
         portfolio: ['01', 'PORTFOLIO', '0', ''],
-        contents: ['02', 'CONTENTS', '1', '继续下滑' + afHTML('↓', AF_DIR['↓'], 'loop')],
-        end: ['03', 'THANK YOU', '2', '向上回到目录' + afHTML('↑', AF_DIR['↑'], 'loop')]
+        about: ['02', 'ABOUT ME', '1', down],
+        contents: ['03', 'CONTENTS', '2', down],
+        end: ['04', 'THANK YOU', '3', '向上回到目录' + afHTML('↑', AF_DIR['↑'], 'loop')]
       }[scene];
       document.getElementById('sceneNo').textContent = info[0];
       document.getElementById('sceneName').textContent = info[1];
@@ -345,15 +350,23 @@
     return titleO > .01;
   }
 
+  // 机位：视频播放期间不动（倍数 1）；播完后在 关于我 → 目录 → 结束 之间平滑推移
+  function camAt(w) {
+    if (w <= stageW[ABOUT_STAGE]) return STAGES[stageAt(w)].cam;
+    const k = w < stageW[CONTENTS_STAGE] ? ABOUT_STAGE : CONTENTS_STAGE;
+    const f = smoothstep(0, 1, (w - stageW[k]) / SWAP_W), a = STAGES[k].cam, b = STAGES[k + 1].cam;
+    return a.map((v, n) => lerp(v, b[n], f));
+  }
+
   let w = -W0, dirty = true, hold = 0, dir = 1, lastFrame = -1, sceneVer = 0, titleShown = true;
   function draw() {
     fctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     fctx.imageSmoothingQuality = 'high';
     const t = timeAtW(w);
     const i = nearDecoded(frameAt(t), tween && tween.fast ? 16 : 4);
-    const st = STAGES[stageAt(w)];
-    if (st.hold) anchor = st.hold;
-    zoom = 1 + (st.zoom || 0) * hold * hold * (3 - 2 * hold);
+    const st = STAGES[stageAt(w)], cam = camAt(w);
+    anchor = [cam[1], cam[2]];
+    zoom = cam[0] * (1 + (st.zoom || 0) * hold * hold * (3 - 2 * hold));
     drawFilm(i);
     titleShown = updateText(t);
     drawFront(i, titleShown);
@@ -369,11 +382,12 @@
     const moving = !!tween;
     if (tween) stepTween(now);
     const n = stageAt(w);
-    const resting = !tween && !dragging && STAGES[n].hold && Math.abs(w - stageW[n]) < 0.01 && !reduced.matches;
+    const resting = !tween && !dragging && Math.abs(w - stageW[n]) < 0.01 && !reduced.matches;
     const h = resting ? Math.min(1, hold + dt / HOLD_SECS) : Math.max(0, hold - dt * 2.5);
     const holdChanged = h !== hold;
     hold = h;
     if (moving || holdChanged || dirty) { draw(now); dirty = false; }
+    pointerFrame(dt);
     if (glass) glass.frame(now);
     requestAnimationFrame(tick);
   }
@@ -471,30 +485,51 @@
     closeWork();
   }));
 
-  // EXPLORE：神凰转身走出画面，随后目录浮现
-  explore.addEventListener('click', () => goTo(CONTENTS_STAGE));
+  // EXPLORE：神凰转身走出画面，随后「关于我」入场
+  explore.addEventListener('click', () => goTo(ABOUT_STAGE));
   arrowFlow(explore.querySelector('i'), explore, [0, 1]);
   arrowFlow(document.querySelector('.dl-btn i'), document.querySelector('.dl'), [0, 1]);
   document.querySelectorAll('[data-work]').forEach(card => arrowFlow(card.querySelector('.top i'), card));
 
-  // 鼠标靠近 EXPLORE 时按钮被轻轻吸过去，离开后弹回
-  if (matchMedia('(hover: hover)').matches) {
-    const RANGE = 150, PULL = .24, MAX = 14;
+  // 鼠标：EXPLORE 的磁吸，「关于我」「结束」两页的视差（肖像卡跟着鼠标微微转动，文字反向轻移）。
+  // 都在主循环里做弹性跟随，不用 CSS 过渡：跟手、不发涩，离开范围时也是慢慢松开而不是突然弹回
+  const ptr = { x: .5, y: .5, sx: .5, sy: .5, tx: 0, ty: 0, mx: 0, my: 0, shown: '' };
+  if (matchMedia('(hover: hover) and (pointer: fine)').matches) {
+    const RANGE = 190, MAX = 16;
     addEventListener('pointermove', e => {
+      if (e.pointerType !== 'mouse') return;
+      ptr.x = e.clientX / vw; ptr.y = e.clientY / vh;
+      ptr.tx = ptr.ty = 0;
       if (!explore.classList.contains('on')) return;
-      const r = explore.getBoundingClientRect(), dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2), d = Math.hypot(dx, dy);
-      const k = d < RANGE ? Math.min(MAX / Math.max(d, 1), PULL) : 0;
-      explore.style.setProperty('--mx', `${(dx * k).toFixed(1)}px`);
-      explore.style.setProperty('--my', `${(dy * k).toFixed(1)}px`);
+      const dx = e.clientX - (explore.offsetLeft + explore.offsetWidth / 2), dy = e.clientY - (explore.offsetTop + explore.offsetHeight / 2), d = Math.hypot(dx, dy);
+      const pull = Math.min(d * .32, MAX) * (1 - smoothstep(RANGE * .4, RANGE, d)) / Math.max(d, 1);
+      ptr.tx = dx * pull; ptr.ty = dy * pull;
     }, { passive: true });
+    document.documentElement.addEventListener('mouseleave', () => { ptr.tx = ptr.ty = 0; ptr.x = ptr.y = .5; });
+  }
+  function pointerFrame(dt) {
+    if (!explore.classList.contains('on')) ptr.tx = ptr.ty = 0;
+    const k = 1 - Math.exp(-dt * 9);
+    if (Math.abs(ptr.tx - ptr.mx) + Math.abs(ptr.ty - ptr.my) > .02) {
+      ptr.mx += (ptr.tx - ptr.mx) * k; ptr.my += (ptr.ty - ptr.my) * k;
+      explore.style.setProperty('--mx', `${ptr.mx.toFixed(2)}px`);
+      explore.style.setProperty('--my', `${ptr.my.toFixed(2)}px`);
+    }
+    const el = aboutEl.dataset.st === 'in' ? aboutEl : endEl.dataset.st === 'in' ? endEl : null;
+    if (!el || reduced.matches) return;
+    const k2 = 1 - Math.exp(-dt * 4.5), ox = ptr.sx, oy = ptr.sy;
+    ptr.sx += (ptr.x - ptr.sx) * k2; ptr.sy += (ptr.y - ptr.sy) * k2;
+    if (ptr.shown === el.className && Math.abs(ptr.sx - ox) + Math.abs(ptr.sy - oy) < 2e-4) return;
+    ptr.shown = el.className;
+    el.style.setProperty('--px', (ptr.sx - .5).toFixed(4));
+    el.style.setProperty('--py', (ptr.sy - .5).toFixed(4));
   }
 
   // 底部进度条：按住拖动可以逐帧看动作，松手后顺着拖动方向把动作播完
   const bar = document.querySelector('.bar');
   const dragTo = e => {
     const r = bar.getBoundingClientRect();
-    const t = clamp((e.clientX - r.left) / r.width, 0, 1) * DURATION;
-    const nw = wallAt(Math.max(INTRO_T, t)) - W0;
+    const nw = clamp((e.clientX - r.left) / r.width * (W0 + W_MAX) - W0, 0, W_MAX);
     dir = Math.sign(nw - w) || dir;
     w = nw; dirty = true;
   };
@@ -518,9 +553,8 @@
     { slug: 'da-ji-shi', no: '02', title: '大吉市', focal: '70% 50%', pages: ['大吉市：生鲜购物体验项目介绍', 'UI 视觉规范', '首页展示', '购物车介绍', '我的页面：围绕账户查看、订单处理与日常服务', '早餐好搭档', '会员中心', '当季鲜品', '页面总览'] },
     { slug: 'ru-yi', no: '03', title: '如意医疗', focal: '60% 50%', pages: ['如意：AI 健康服务项目介绍', '首页展示：让健康疑问有清楚的表达起点', '健康页面：让信息记录带着当时的情况呈现', '就医页面：让就医选择有据可循', '报告解读：先看关注项，再对照数值与原报告', '等待医生接诊：看清进度与已提交内容', '页面总览'] },
     { slug: 'ai-ops', no: '04', title: '运营设计', focal: '74% 50%', pages: ['AI 赋能运营设计：开学元气补给', 'AI 赋能运营设计：开学焕新计划', 'AI 赋能运营设计：活动主视觉', 'AI 赋能运营设计：新年与夏日双主题', 'AI 赋能运营设计：去野与春日双主题', 'AI 赋能运营设计：数据大屏（一）', 'AI 赋能运营设计：数据大屏（二）'] },
-    { slug: 'about', no: '00', title: '个人介绍', focal: '50% 50%', pages: ['个人介绍：郭凯华，UX / 产品体验设计'] },
   ];
-  const PROJECTS = 4, ABOUT = 4;            // 前 4 个是目录里的作品，第 5 个是个人介绍（顶部导航「关于」打开）
+  const PROJECTS = WORKS.length;
   const PAGE_W = [1280, 2560, 3840], PAGE_SIZES = '(min-width: 1920px) 1920px, 100vw';
   const MORPH_MS = 620, MORPH_EASE = 'cubic-bezier(.22,1,.36,1)', PAGE_RADIUS = 0;
   const $ = id => document.getElementById(id);
@@ -588,15 +622,14 @@
   }
   function fillEnd(i) {
     rEnd.textContent = '';
-    if (i === ABOUT) rEnd.append(nextLink(0, '从第一个作品开始看'));
-    else if (i < PROJECTS - 1) rEnd.append(nextLink(i + 1, '下一个作品'));
+    if (i < PROJECTS - 1) rEnd.append(nextLink(i + 1, '下一个作品'));
     else {
       const p = document.createElement('p');
       p.className = 'r-done'; p.textContent = '四个作品已全部看完';
       rEnd.append(p, downloadLink());
     }
     const back = document.createElement('button');
-    back.className = 'r-back'; back.textContent = i === ABOUT ? '返回' : '回到目录';
+    back.className = 'r-back'; back.textContent = '回到目录';
     back.addEventListener('click', () => closeWork());
     rEnd.append(back);
   }
@@ -748,13 +781,6 @@
     card.addEventListener('focus', warm);
   });
 
-  // 顶部导航「关于」：打开个人介绍（在作品里点则直接切换过去）
-  document.querySelectorAll('[data-about]').forEach(b => b.addEventListener('click', e => {
-    e.preventDefault();
-    if (openIdx < 0) openWork(ABOUT);
-    else if (openIdx !== ABOUT) switchWork(ABOUT);
-  }));
-
   let zoomFrom = null;
   function openZoom(img) {
     // 放大查看直接上 3840 超清图，先用已加载的那一档垫底
@@ -863,7 +889,7 @@
       grad: `uniform sampler2D uP, uVel;
         void main(){ float L=texture(uP,vL).x,R=texture(uP,vR).x,T=texture(uP,vT).x,B=texture(uP,vB).x; o=vec4(texture(uVel,vUv).xy-vec2(R-L,T-B),0.,1.); }`,
       scale: `uniform sampler2D uT; uniform float k; void main(){ o=k*texture(uT,vUv); }`,
-      show: `uniform sampler2D uDye, uVel, uFilm, uTitle, uFront; uniform vec2 dyeTexel, velTexel; uniform float time, a0, a1, b0, b1, edge, refr, haze, blur, spec; uniform int hasTitle, hasFront;
+      show: `uniform sampler2D uDye, uVel, uFilm, uTitle, uFront; uniform vec2 dyeTexel, velTexel; uniform float time, a0, a1, b0, b1, edge, refr, haze, blur, spec; uniform int hasTitle, hasFront, noScene;
         float dd(vec2 uv){ float d=texture(uDye,uv).x; return isnan(d)||isinf(d)?0.:clamp(d,0.,4.); }
         float body(vec2 uv){ return smoothstep(b0,b1,dd(uv)); }
         vec3 scene(vec2 uv){
@@ -880,6 +906,14 @@
           vec2 e=dyeTexel*1.5;
           vec2 n=vec2(body(vUv+vec2(e.x,0.))-body(vUv-vec2(e.x,0.)), body(vUv+vec2(0.,e.y))-body(vUv-vec2(0.,e.y)));
           float g=length(n);
+          if(noScene==1){
+            float rim0=smoothstep(.05,.4,g)*(1.-c*.6);
+            vec3 tint=mix(vec3(.78,.9,1.),vec3(1.,.86,.6),.5+.5*sin(time*.5+vUv.x*4.));
+            vec3 N0=normalize(vec3(-n*3.,1.));
+            float sp=pow(max(dot(N0,normalize(vec3(-.45,.55,1.))),0.),40.);
+            float al=clamp(c*(haze+.2)+rim0*(edge+.34)+sp*.5,0.,1.)*a;
+            o=vec4(mix(vec3(.96,.98,1.),tint,clamp(rim0*1.2,0.,1.)*.7)*al,al); return;
+          }
           vec2 fl=clamp(texture(uVel,vUv).xy*velTexel,-6.,6.)*.006*c;
           vec2 base=vUv-(n*refr+fl);
           float r=1.+blur*c;
@@ -961,6 +995,8 @@
         tc.fillText(el.textContent, 0, y);
       }
     }
+    // 双击 index.html 直接打开（file://）时，浏览器不允许把画面读进显卡，折射做不了：
+    // 这时改用「雾尾」模式，只画白雾、冰蓝淡金的亮边和高光，形态和流动与完整版一致
     let texUploadOk = true;
     function upload(t, src) {
       if (!texUploadOk) return;
@@ -1009,7 +1045,7 @@
       if (e.pointerType !== 'mouse') return;
       cur.x = e.clientX; cur.y = e.clientY;
       if (!cur.inside) { cur.inside = true; cur.dx = cur.rx = cur.x; cur.dy = cur.ry = cur.y; lastHead = null; }
-      if (blocked() || !texUploadOk) return;
+      if (blocked()) return;
       lastInput = performance.now();
       if (!awake) { awake = true; size(); uploadedVer = -1; lastHead = null; }
     }, { passive: true });
@@ -1040,7 +1076,6 @@
         dot.style.transform = `translate(${cur.dx.toFixed(1)}px,${cur.dy.toFixed(1)}px)`;
         ring.style.transform = `translate(${cur.rx.toFixed(1)}px,${cur.ry.toFixed(1)}px)`;
       }
-      if (!texUploadOk) return;
       if (!warmed && !awake && !portrait) {
         warmed = true;
         size(); splats.push({ x: 0, y: 0, vx: 0, vy: 0, n: 1 }); simulate(dt, now); clearAll();
@@ -1074,7 +1109,6 @@
       if (uploadedVer !== sceneVer) {
         uploadedVer = sceneVer;
         upload(sceneTex[0], film);
-        if (!texUploadOk) { sleepGlass(); return; }
         if (titleShown) { drawTitle(); upload(sceneTex[1], titleCanvas); upload(sceneTex[2], front); }
       }
       const { p, u } = prog.show;
@@ -1084,15 +1118,15 @@
       gl.uniform2fv(u.dyeTexel, dye.a.texel); gl.uniform2fv(u.velTexel, vt);
       gl.uniform1f(u.time, (now - t0) / 1000);
       ['a0', 'a1', 'b0', 'b1', 'edge', 'refr', 'haze', 'blur', 'spec'].forEach(k => gl.uniform1f(u[k], CFG[k]));
-      gl.uniform1i(u.hasTitle, titleShown ? 1 : 0); gl.uniform1i(u.hasFront, titleShown ? 1 : 0);
+      gl.uniform1i(u.hasTitle, titleShown ? 1 : 0); gl.uniform1i(u.hasFront, titleShown ? 1 : 0); gl.uniform1i(u.noScene, texUploadOk ? 0 : 1);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, cw, ch);
       gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
-    return { frame };
+    return { frame, flat: () => { texUploadOk = false; }, mode: () => texUploadOk ? 'refract' : 'mist' };
   })();
 
-  window.phoenixPortfolio = { state: () => ({ tier, loadedMB: +(loadedBytes / 1048576).toFixed(1), started, mode: useImg ? 'img' : 'blob', w, t: timeAtW(w), frame: lastFrame / 2, settled, hold, zoom, tween: tween ? tween.stage : null, loadedFrames, masks: masks.filter(Boolean).length, decoded: [...decoded.values()].filter(Boolean).length, vw, vh, openIdx, busy }) };
+  window.phoenixPortfolio = { glass, state: () => ({ scene: lastScene, about: aboutEl.dataset.st || '', end: endEl.dataset.st || '', tier, loadedMB: +(loadedBytes / 1048576).toFixed(1), started, mode: useImg ? 'img' : 'blob', w, t: timeAtW(w), frame: lastFrame / 2, settled, hold, zoom, tween: tween ? tween.stage : null, loadedFrames, masks: masks.filter(Boolean).length, decoded: [...decoded.values()].filter(Boolean).length, vw, vh, openIdx, busy }) };
 
   layout();
   if (deepWork >= 0) { w = stageW[CONTENTS_STAGE]; settled = CONTENTS_STAGE; openWork(deepWork, { instant: true, push: false }); }
