@@ -89,6 +89,29 @@
   let loadedFrames = 0, loadedBytes = 0, started = false;
   const pad = (n, w) => String(n).padStart(w, '0');
   let useImg = location.protocol === 'file:', blobOk = false;
+  // 双击 index.html（file://）打开时，浏览器把本地图片当成“别的网站”的图：画进画布后画布就被锁住，WebGL 读不到画面，
+  // 鼠标的流体玻璃没法折射。所以本地打开时改从 local/ 里的脚本包加载同一批图（data: 地址不会锁画布），效果和线上一致。
+  // local/ 由 tools/build-local.py 生成、只在本机使用（.gitignore 已排除，线上走正常的图片请求）。缺包时自动退回普通图片。
+  const PACK = 8, packs = {}, packWait = {};
+  let packed = false;   // 本地包加载成功：图片可以像线上一样提前解码成位图，播放更顺
+  window.__phxPack = (name, urls) => { if (packWait[name]) packWait[name](urls); };
+  const pack = name => packs[name] || (packs[name] = new Promise(res => {
+    packWait[name] = res;
+    const sc = document.createElement('script');
+    sc.src = `local/${name}.js`;
+    sc.onload = () => sc.remove();
+    sc.onerror = () => { sc.remove(); res(null); };
+    document.head.append(sc);
+  }));
+  const packRef = src => {
+    let m = src.match(/^frames\/hd\/(\d{4})\.webp$/);
+    if (m) { const n = +m[1]; return ['f' + pad(Math.floor(n / PACK), 2), n % PACK]; }
+    m = src.match(/^frames\/still\/(\d{4})\.webp$/);
+    if (m) return ['s' + m[1], 0];
+    m = src.match(/^masks\/(\d{3})\.webp$/);
+    if (m) { const n = +m[1]; return ['m' + pad(Math.floor(n / PACK), 2), n % PACK]; }
+    return null;
+  };
   const loadImage = (src, into, i, tries = 3) => new Promise(done => {
     const retry = () => tries > 1 ? setTimeout(() => loadImage(src, into, i, tries - 1).then(done), 400) : done();
     if (!useImg) {
@@ -103,7 +126,9 @@
     img.decoding = 'async';
     img.onload = () => { into[i] = img; done(); };
     img.onerror = retry;
-    img.src = src;
+    const ref = packRef(src);
+    if (ref) pack(ref[0]).then(urls => { const u = urls && urls[ref[1]]; if (u) packed = true; img.src = u || src; });
+    else img.src = src;
   });
 
   // 加载顺序：首帧 → 开场骨架帧（每 4 帧一张）→ 按时间补齐其余帧。抠像图跟着它的第一帧一起排队。
@@ -130,6 +155,24 @@
     loadT0 = performance.now();
     await Promise.all(Array.from({ length: 8 }, worker));
     progressLoad(true);
+    loadStills();
+  }
+
+  // 超清静帧：首页定格那一帧、关于我 / 目录 / 结束共用的末帧，是停下来盯着看的画面，另备 2880 宽的版本。
+  // 序列帧都到齐后再加载；屏幕本身不够大（物理像素宽不到 2000）就不加载
+  const STILLS = [READY_FRAME, LAST_FRAME], stills = new Map();
+  async function loadStills() {
+    if (tier !== 'hd' || Math.max(innerWidth, innerHeight) * Math.min(devicePixelRatio || 1, 2) < 2000) return;
+    const got = [];
+    await Promise.all(STILLS.map(n => loadImage(`frames/still/${pad(n, 4)}.webp`, got, n, 2)));
+    for (const n of STILLS) {
+      const src = got[n];
+      if (!src) continue;
+      let bmp = src;
+      if (!isImg(src)) { try { bmp = await createImageBitmap(src); } catch { continue; } }
+      stills.set(n * 2, bmp);
+    }
+    dirty = true;
   }
 
   function probeTier() {
@@ -178,7 +221,7 @@
   const isImg = x => x instanceof HTMLImageElement;
 
   function keepDecoded(center, dir) {
-    if (useImg) return; // file:// 模式下直接使用已解码的 HTMLImageElement，零开销
+    if (useImg && !packed) return; // 普通本地图片画进位图会锁画布，直接用 HTMLImageElement
     // 预解码窗口（槽位，2 槽 = 1 帧）：1080p 位图每张约 8MB，手机上收窄窗口控制内存
     const small = innerWidth < 800;
     const ahead = tier === 'hd' ? (small ? 36 : 60) : (small ? 48 : 80), behind = small ? 12 : 16;
@@ -206,7 +249,7 @@
   }
 
   function nearDecoded(i, r) {
-    if (useImg) {
+    if (useImg && !packed) {
       for (let d = 0; d <= r; d += 2) for (const j of [i + d * dir, i - d * dir]) {
         if (hasSlot(j) && isImg(frames[j])) return j;
       }
@@ -222,7 +265,7 @@
   }
 
   function frameSource(i) {
-    if (!useImg) {
+    if (!useImg || packed) {
       for (let d = 0; d <= 120; d += 2) for (const j of [i + d * dir, i - d * dir]) {
         const bmp = hasSlot(j) && decoded.get(slotKey(j));
         if (bmp) return bmp;
@@ -266,7 +309,7 @@
     return [ax - anchor[0] * w, ay - anchor[1] * h, w, h];
   }
   function drawFilm(i) {
-    const src = frameSource(i);
+    const src = stills.get(i) || frameSource(i);
     if (src) fctx.drawImage(src, 0, 0, src.naturalWidth || src.width, src.naturalHeight || src.height, ...placement());
   }
   function drawFront(i, titleVisible) {
@@ -275,14 +318,14 @@
     const pick = (key, raw) => decoded.get(key) || (isImg(raw) ? raw : null);
     const m = maskKey(i);
     if (!titleVisible || !m) return;
-    const sheet = pick(m, masks[i >> 2]), img = pick('f' + i, frames[i]);
+    const sheet = pick(m, masks[i >> 2]), img = stills.get(i) || pick('f' + i, frames[i]);
     if (!sheet || !img) return;
     const box = placement();
     tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     tctx.imageSmoothingQuality = 'high';
     tctx.drawImage(sheet, 0, ((i >> 1) & 1) * MASK_H, MASK_W, MASK_H, ...box);
     tctx.globalCompositeOperation = 'source-in';
-    tctx.drawImage(img, ...box);
+    tctx.drawImage(img, 0, 0, img.naturalWidth || img.width, img.naturalHeight || img.height, ...box);
     tctx.globalCompositeOperation = 'source-over';
   }
 
@@ -889,7 +932,7 @@
       grad: `uniform sampler2D uP, uVel;
         void main(){ float L=texture(uP,vL).x,R=texture(uP,vR).x,T=texture(uP,vT).x,B=texture(uP,vB).x; o=vec4(texture(uVel,vUv).xy-vec2(R-L,T-B),0.,1.); }`,
       scale: `uniform sampler2D uT; uniform float k; void main(){ o=k*texture(uT,vUv); }`,
-      show: `uniform sampler2D uDye, uVel, uFilm, uTitle, uFront; uniform vec2 dyeTexel, velTexel; uniform float time, a0, a1, b0, b1, edge, refr, haze, blur, spec; uniform int hasTitle, hasFront, noScene;
+      show: `uniform sampler2D uDye, uVel, uFilm, uTitle, uFront; uniform vec2 dyeTexel, velTexel; uniform float time, a0, a1, b0, b1, edge, refr, haze, blur, spec; uniform int hasTitle, hasFront;
         float dd(vec2 uv){ float d=texture(uDye,uv).x; return isnan(d)||isinf(d)?0.:clamp(d,0.,4.); }
         float body(vec2 uv){ return smoothstep(b0,b1,dd(uv)); }
         vec3 scene(vec2 uv){
@@ -906,14 +949,6 @@
           vec2 e=dyeTexel*1.5;
           vec2 n=vec2(body(vUv+vec2(e.x,0.))-body(vUv-vec2(e.x,0.)), body(vUv+vec2(0.,e.y))-body(vUv-vec2(0.,e.y)));
           float g=length(n);
-          if(noScene==1){
-            float rim0=smoothstep(.05,.4,g)*(1.-c*.6);
-            vec3 tint=mix(vec3(.78,.9,1.),vec3(1.,.86,.6),.5+.5*sin(time*.5+vUv.x*4.));
-            vec3 N0=normalize(vec3(-n*3.,1.));
-            float sp=pow(max(dot(N0,normalize(vec3(-.45,.55,1.))),0.),40.);
-            float al=clamp(c*(haze+.2)+rim0*(edge+.34)+sp*.5,0.,1.)*a;
-            o=vec4(mix(vec3(.96,.98,1.),tint,clamp(rim0*1.2,0.,1.)*.7)*al,al); return;
-          }
           vec2 fl=clamp(texture(uVel,vUv).xy*velTexel,-6.,6.)*.006*c;
           vec2 base=vUv-(n*refr+fl);
           float r=1.+blur*c;
@@ -995,8 +1030,7 @@
         tc.fillText(el.textContent, 0, y);
       }
     }
-    // 双击 index.html 直接打开（file://）时，浏览器不允许把画面读进显卡，折射做不了：
-    // 这时改用「雾尾」模式，只画白雾、冰蓝淡金的亮边和高光，形态和流动与完整版一致
+    // 画面读不进显卡时（本地打开又缺 local/ 包）折射做不了：不画尾巴，只留光点和细圈
     let texUploadOk = true;
     function upload(t, src) {
       if (!texUploadOk) return;
@@ -1045,7 +1079,7 @@
       if (e.pointerType !== 'mouse') return;
       cur.x = e.clientX; cur.y = e.clientY;
       if (!cur.inside) { cur.inside = true; cur.dx = cur.rx = cur.x; cur.dy = cur.ry = cur.y; lastHead = null; }
-      if (blocked()) return;
+      if (blocked() || !texUploadOk) return;
       lastInput = performance.now();
       if (!awake) { awake = true; size(); uploadedVer = -1; lastHead = null; }
     }, { passive: true });
@@ -1109,6 +1143,7 @@
       if (uploadedVer !== sceneVer) {
         uploadedVer = sceneVer;
         upload(sceneTex[0], film);
+        if (!texUploadOk) { sleepGlass(); return; }
         if (titleShown) { drawTitle(); upload(sceneTex[1], titleCanvas); upload(sceneTex[2], front); }
       }
       const { p, u } = prog.show;
@@ -1118,15 +1153,15 @@
       gl.uniform2fv(u.dyeTexel, dye.a.texel); gl.uniform2fv(u.velTexel, vt);
       gl.uniform1f(u.time, (now - t0) / 1000);
       ['a0', 'a1', 'b0', 'b1', 'edge', 'refr', 'haze', 'blur', 'spec'].forEach(k => gl.uniform1f(u[k], CFG[k]));
-      gl.uniform1i(u.hasTitle, titleShown ? 1 : 0); gl.uniform1i(u.hasFront, titleShown ? 1 : 0); gl.uniform1i(u.noScene, texUploadOk ? 0 : 1);
+      gl.uniform1i(u.hasTitle, titleShown ? 1 : 0); gl.uniform1i(u.hasFront, titleShown ? 1 : 0);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, cw, ch);
       gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
-    return { frame, flat: () => { texUploadOk = false; }, mode: () => texUploadOk ? 'refract' : 'mist' };
+    return { frame, mode: () => texUploadOk ? 'refract' : 'off' };
   })();
 
-  window.phoenixPortfolio = { glass, state: () => ({ scene: lastScene, about: aboutEl.dataset.st || '', end: endEl.dataset.st || '', tier, loadedMB: +(loadedBytes / 1048576).toFixed(1), started, mode: useImg ? 'img' : 'blob', w, t: timeAtW(w), frame: lastFrame / 2, settled, hold, zoom, tween: tween ? tween.stage : null, loadedFrames, masks: masks.filter(Boolean).length, decoded: [...decoded.values()].filter(Boolean).length, vw, vh, openIdx, busy }) };
+  window.phoenixPortfolio = { glass, state: () => ({ scene: lastScene, about: aboutEl.dataset.st || '', end: endEl.dataset.st || '', tier, loadedMB: +(loadedBytes / 1048576).toFixed(1), started, mode: useImg ? 'img' : 'blob', w, t: timeAtW(w), frame: lastFrame / 2, settled, hold, zoom, tween: tween ? tween.stage : null, loadedFrames, masks: masks.filter(Boolean).length, decoded: [...decoded.values()].filter(Boolean).length, stills: [...stills.keys()].map(k => k / 2), vw, vh, openIdx, busy }) };
 
   layout();
   if (deepWork >= 0) { w = stageW[CONTENTS_STAGE]; settled = CONTENTS_STAGE; openWork(deepWork, { instant: true, push: false }); }
