@@ -3,3 +3,4 @@
 source/
 *.mp4
 local/
+.stats-admin

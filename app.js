@@ -28,9 +28,10 @@
   const ABOUT_T = 13.2;                    // 神凰走到这一秒（身体大半出画）时「关于我」开始入场
   // 姓名和联系方式：填上就会显示在结尾页，点击可复制；留空则不显示
   const CONTACT = { name: '郭凯华', email: '', wechat: '' };
-  // 访问量和下载量：GoatCounter（免费、无 Cookie）。不加载任何统计脚本，只发一个 1 像素的计数请求；
-  // 本机预览（localhost / 双击打开）不计数。到 https://www.goatcounter.com 注册时站点代码填 kaihuaguo-design 即可生效，留空则关闭
-  const STATS = 'https://kaihuaguo-design.goatcounter.com/count';
+  // 访问量和下载量：两个计数器（Abacus 免费计数服务，不用注册、不用 Cookie、不加载任何统计脚本），每次只发一个很小的请求。
+  // 访问：同一个浏览器窗口里刷新、来回切换只算一次；下载：每点一次“下载 PDF”算一次。本机预览（localhost / 双击打开）不计数。
+  // 查看数字：打开网站的 stats.html。留空则关闭统计
+  const STATS = 'https://abacus.jasoncameron.dev/hit/kaihuaguo-design/';
   // 播放速度（相对原速）。点击后为了让目录早点出来：凝视段 2 倍速带过；转身段 1.35 倍；走出画面段 0.95 倍
   const rate = t => lerp(1.15, 0.92, smoothstep(10.8, 12.0, t)) * (1 + smoothstep(7.4, 7.7, t) * lerp(1, 0.38, smoothstep(9.0, 9.8, t)) * (1 - smoothstep(10.4, 11.4, t)));
   const LAST_SLOT = LAST_FRAME * 2;
@@ -316,15 +317,14 @@
     setTimeout(() => {
       loadCovers();
       document.querySelectorAll('img[data-srcset]').forEach(img => { img.srcset = img.dataset.srcset; img.src = img.dataset.src; img.removeAttribute('data-srcset'); });
-      stat(location.pathname, document.title);
+      let seen = false;
+      try { seen = sessionStorage.getItem('phx-visit') === '1'; sessionStorage.setItem('phx-visit', '1'); } catch {}
+      if (!seen) stat('visits');
     }, 0);
   }
-  function stat(path, title) {
+  function stat(key) {
     if (!STATS || location.protocol === 'file:' || /^(localhost|127\.|\[::1\]|0\.0\.0\.0)/.test(location.hostname) || navigator.webdriver) return;
-    const event = path !== location.pathname;
-    const q = new URLSearchParams({ p: path, t: title, s: `${screen.width},${screen.height},${devicePixelRatio || 1}`, rnd: Math.random().toString(36).slice(2) });
-    if (event) q.set('e', 'true'); else if (document.referrer) q.set('r', document.referrer);
-    try { new Image().src = `${STATS}?${q}`; } catch {}
+    try { fetch(STATS + key, { mode: 'cors', keepalive: true, cache: 'no-store' }).catch(() => {}); } catch {}
   }
 
   // ---------- 位置与布局 ----------
@@ -905,7 +905,7 @@
   function bindDownload(link, show) {
     link.setAttribute('download', PDF_NAME);
     link.addEventListener('click', async e => {
-      stat('download-pdf', '下载 PDF 作品集');
+      stat('downloads');
       if (!window.claude || !window.claude.use) { show('ok'); return; }
       e.preventDefault();
       try {

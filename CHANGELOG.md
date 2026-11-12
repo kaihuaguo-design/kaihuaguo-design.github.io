@@ -1,5 +1,10 @@
 # 版本记录
 
+## v2.4.0 — 2026-11-13 · 自带统计
+
+- 访问量与下载量改为自己写的两个计数器（Abacus 免费计数服务，不用注册），去掉 GoatCounter。
+- 新增 stats.html：只给自己看的统计页，显示访问量和下载量。
+
 ## v2.3.1 — 2026-11-13 · 换到正式网址
 
 - 仓库转到 GitHub 组织 kaihuaguo-design，网址 https://kaihuaguo-design.github.io/ 。

@@ -34,12 +34,16 @@ local/*.js            本地包：双击 index.html 打开时用，不上传（.
 
 ## 访问量与下载量
 
-用 GoatCounter（免费、不用 Cookie、不加载统计脚本，只发一个 1 像素的计数请求，对加载速度没有影响）：
+不用注册任何账号，打开 **https://kaihuaguo-design.github.io/stats.html** 就能看两个数（网站里没有入口链到这个页面，只有你知道）：
 
-- **访问量**：每次打开网站记一次，后台首页的 Pageviews / Visitors。
-- **下载量**：每次点“下载 PDF”（顶部导航、结束页、阅读页底部）记一次，后台事件 `download-pdf`。
-- 本机预览（双击打开、localhost）不计数。
-- 查看：https://kaihuaguo-design.goatcounter.com （注册 GoatCounter 时站点代码填 `kaihuaguo-design`）。
+- **访问量**：打开网站的次数。同一个浏览器窗口里刷新、来回切换只算一次。
+- **下载量**：点“下载 PDF”的次数（顶部导航、结束页、阅读页底部三处都算）。
+
+做法：`app.js` 里的 `stat()` 给免费计数服务 Abacus（abacus.jasoncameron.dev）上的两个计数器 `kaihuaguo-design/visits`、`kaihuaguo-design/downloads` 各加 1。
+不加载统计脚本、不用 Cookie，每次只发一个很小的请求，不影响加载速度。本机预览（双击打开、localhost）不计数。
+
+- 计数器连续半年没有新的访问会被服务清空。
+- 两个计数器的管理密钥（可清零）保存在本机 `.stats-admin`，不上传。
 
 > 本地预览：双击 `本地预览.command`（会自动打开浏览器；等同于在本文件夹运行 `python3 -m http.server 8000`）。
 > 直接双击 index.html 也是完整效果：浏览器不许网页读取本地图片的画面，鼠标的流体玻璃本来做不了折射，所以本地打开时改从 `local/` 里的本地包加载同一批画面。
