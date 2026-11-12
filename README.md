@@ -23,19 +23,23 @@ local/*.js            本地包：双击 index.html 打开时用，不上传（.
 
 ## 发布到 GitHub Pages
 
-1. 在 GitHub 新建一个仓库（例如 `portfolio`）。
-2. 在本文件夹里执行：
+网址：https://kaihuaguo-design.github.io/
+
+- 仓库：GitHub 组织 `kaihuaguo-design` 下的 `kaihuaguo-design.github.io`（公开）。
+- 发布方式：Settings → Pages → Deploy from a branch，`main` / `(root)`。以后改完内容，推送到 `main` 一两分钟后自动更新：
 
    ```bash
-   git remote add origin https://github.com/<你的用户名>/portfolio.git
+   git push origin main --tags
    ```
 
-   ```bash
-   git push -u origin main --tags
-   ```
+## 访问量与下载量
 
-3. 仓库 Settings → Pages → Source 选 `Deploy from a branch`，分支选 `main` / `(root)`，保存。
-4. 一两分钟后访问 `https://<你的用户名>.github.io/portfolio/`。
+用 GoatCounter（免费、不用 Cookie、不加载统计脚本，只发一个 1 像素的计数请求，对加载速度没有影响）：
+
+- **访问量**：每次打开网站记一次，后台首页的 Pageviews / Visitors。
+- **下载量**：每次点“下载 PDF”（顶部导航、结束页、阅读页底部）记一次，后台事件 `download-pdf`。
+- 本机预览（双击打开、localhost）不计数。
+- 查看：https://kaihuaguo-design.goatcounter.com （注册 GoatCounter 时站点代码填 `kaihuaguo-design`）。
 
 > 本地预览：双击 `本地预览.command`（会自动打开浏览器；等同于在本文件夹运行 `python3 -m http.server 8000`）。
 > 直接双击 index.html 也是完整效果：浏览器不许网页读取本地图片的画面，鼠标的流体玻璃本来做不了折射，所以本地打开时改从 `local/` 里的本地包加载同一批画面。

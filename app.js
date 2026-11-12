@@ -28,8 +28,8 @@
   // 姓名和联系方式：填上就会显示在结尾页，点击可复制；留空则不显示
   const CONTACT = { name: '郭凯华', email: '', wechat: '' };
   // 访问量和下载量：GoatCounter（免费、无 Cookie）。不加载任何统计脚本，只发一个 1 像素的计数请求；
-  // 本机预览（localhost / 双击打开）不计数。到 https://www.goatcounter.com 注册时站点代码填 jianhua-portfolio 即可生效，留空则关闭
-  const STATS = 'https://jianhua-portfolio.goatcounter.com/count';
+  // 本机预览（localhost / 双击打开）不计数。到 https://www.goatcounter.com 注册时站点代码填 kaihuaguo-design 即可生效，留空则关闭
+  const STATS = 'https://kaihuaguo-design.goatcounter.com/count';
   // 播放速度（相对原速）。点击后为了让目录早点出来：凝视段 2 倍速带过；转身段 1.35 倍；走出画面段 0.95 倍
   const rate = t => lerp(1.15, 0.92, smoothstep(10.8, 12.0, t)) * (1 + smoothstep(7.4, 7.7, t) * lerp(1, 0.38, smoothstep(9.0, 9.8, t)) * (1 - smoothstep(10.4, 11.4, t)));
   const LAST_SLOT = LAST_FRAME * 2;
