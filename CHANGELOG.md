@@ -1,5 +1,10 @@
 # 版本记录
 
+## v2.3.1 — 2026-11-13 · 换到正式网址
+
+- 仓库转到 GitHub 组织 kaihuaguo-design，网址 https://kaihuaguo-design.github.io/ 。
+- 修复：服务器偶发错误（如刚发布、刚转仓库时）不再让网站误切到本地模式；本地包只在双击打开时请求。
+
 ## v2.3.0 — 2026-11-13 · 上线 GitHub Pages
 
 - 发布到 GitHub Pages（仓库 kaihuaguo-design.github.io）。

@@ -119,10 +119,11 @@
   const loadImage = (src, into, i, tries = 3) => new Promise(done => {
     const retry = () => tries > 1 ? setTimeout(() => loadImage(src, into, i, tries - 1).then(done), 400) : done();
     if (!useImg) {
+      // 服务器回了错误码（404 / 503 等，比如刚发布时 CDN 还没就绪）只重试；只有请求根本发不出去（跨域被拦）才改用 <img> 加载
       fetch(src).then(r => r.ok ? r.blob() : Promise.reject(r.status))
         .then(b => { into[i] = b; blobOk = true; if (into === frames) loadedBytes += b.size; done(); })
-        .catch(() => {
-          if (!blobOk) { useImg = true; loadImage(src, into, i, 1).then(done); } else retry();
+        .catch(err => {
+          if (!blobOk && err instanceof TypeError) { useImg = true; loadImage(src, into, i, 1).then(done); } else retry();
         });
       return;
     }
@@ -130,7 +131,7 @@
     img.decoding = 'async';
     img.onload = () => { into[i] = img; done(); };
     img.onerror = retry;
-    const ref = packRef(src);
+    const ref = location.protocol === 'file:' && packRef(src);   // 本地包只在双击打开时用，线上从不请求
     if (ref) pack(ref[0]).then(urls => { const u = urls && urls[ref[1]]; if (u) packed = true; img.src = u || src; });
     else img.src = src;
   });
